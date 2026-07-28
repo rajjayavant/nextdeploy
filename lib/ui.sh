@@ -47,18 +47,23 @@ fatal() {
 }
 
 # ── Prompts ────────────────────────────────────────────────────────────────
-# All read from /dev/tty so the script still works when piped from curl.
+# These read from stdin. setup.sh points stdin at /dev/tty on startup, so
+# this works whether the script is run from a file or piped from curl —
+# and, critically, it leaves the terminal free for sudo to prompt on.
+#
+# Prompt text goes to stderr so it stays visible even if a caller captures
+# stdout, and never contaminates a captured value.
 
 prompt() {
   # prompt <varname> <question> [default]
   local __var="$1" __q="$2" __def="${3:-}" __ans=""
   while true; do
     if [ -n "$__def" ]; then
-      printf '%s' "${C_BOLD}?${C_RESET} $__q ${C_DIM}[$__def]${C_RESET} " > /dev/tty
+      printf '%s' "${C_BOLD}?${C_RESET} $__q ${C_DIM}[$__def]${C_RESET} " >&2
     else
-      printf '%s' "${C_BOLD}?${C_RESET} $__q " > /dev/tty
+      printf '%s' "${C_BOLD}?${C_RESET} $__q " >&2
     fi
-    IFS= read -r __ans < /dev/tty || fatal "Input closed unexpectedly."
+    IFS= read -r __ans || fatal "Input closed unexpectedly."
     __ans="${__ans#"${__ans%%[![:space:]]*}"}"
     __ans="${__ans%"${__ans##*[![:space:]]}"}"
     [ -z "$__ans" ] && __ans="$__def"
@@ -76,8 +81,8 @@ confirm() {
   local __q="$1" __def="${2:-y}" __ans="" __opts
   if [ "$__def" = "y" ]; then __opts="Y/n"; else __opts="y/N"; fi
   while true; do
-    printf '%s' "${C_BOLD}?${C_RESET} $__q ${C_DIM}[$__opts]${C_RESET} " > /dev/tty
-    IFS= read -r __ans < /dev/tty || fatal "Input closed unexpectedly."
+    printf '%s' "${C_BOLD}?${C_RESET} $__q ${C_DIM}[$__opts]${C_RESET} " >&2
+    IFS= read -r __ans || fatal "Input closed unexpectedly."
     __ans="$(printf '%s' "$__ans" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
     [ -z "$__ans" ] && __ans="$__def"
     case "$__ans" in
@@ -89,8 +94,8 @@ confirm() {
 }
 
 pause() {
-  printf '%s' "${C_BOLD}↵${C_RESET} ${1:-Press Enter to continue} " > /dev/tty
-  IFS= read -r _ < /dev/tty || true
+  printf '%s' "${C_BOLD}↵${C_RESET} ${1:-Press Enter to continue} " >&2
+  IFS= read -r _ || true
   blank
 }
 
@@ -99,13 +104,13 @@ choose() {
   local __var="$1" __q="$2"; shift 2
   local __opts=("$@") __i __ans
   blank
-  printf '%s\n' "${C_BOLD}?${C_RESET} $__q" > /dev/tty
+  printf '%s\n' "${C_BOLD}?${C_RESET} $__q" >&2
   for __i in "${!__opts[@]}"; do
-    printf '%s\n' "    ${C_BOLD}$((__i + 1)))${C_RESET} ${__opts[$__i]}" > /dev/tty
+    printf '%s\n' "    ${C_BOLD}$((__i + 1)))${C_RESET} ${__opts[$__i]}" >&2
   done
   while true; do
-    printf '%s' "  Enter a number ${C_DIM}[1-${#__opts[@]}]${C_RESET} " > /dev/tty
-    IFS= read -r __ans < /dev/tty || fatal "Input closed unexpectedly."
+    printf '%s' "  Enter a number ${C_DIM}[1-${#__opts[@]}]${C_RESET} " >&2
+    IFS= read -r __ans || fatal "Input closed unexpectedly."
     __ans="$(printf '%s' "$__ans" | tr -d '[:space:]')"
     if [[ "$__ans" =~ ^[0-9]+$ ]] && [ "$__ans" -ge 1 ] && [ "$__ans" -le "${#__opts[@]}" ]; then
       printf -v "$__var" '%s' "${__opts[$((__ans - 1))]}"
@@ -120,7 +125,7 @@ choose() {
 read_multiline() {
   # read_multiline <varname>
   local __var="$1" __line="" __buf=""
-  while IFS= read -r __line < /dev/tty; do
+  while IFS= read -r __line; do
     [ "$__line" = "EOF" ] && break
     __buf+="$__line"$'\n'
   done
@@ -157,7 +162,7 @@ retry_step() {
         blank
         dim "Dropping to a shell. Type 'exit' when you're ready to retry."
         blank
-        "${SHELL:-/bin/bash}" < /dev/tty > /dev/tty 2>&1 || true
+        "${SHELL:-/bin/bash}" || true
         attempt=$((attempt + 1)); continue ;;
       "Skip this step (only if you know it's already done)")
         warn "Skipping: $desc"

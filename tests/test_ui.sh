@@ -10,16 +10,14 @@ check() { # label expected actual
   if [ "$2" = "$3" ]; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); echo "  FAIL $1: got '$3' want '$2'"; fi
 }
 
-# Run a snippet of script with stdin redirected AND /dev/tty faked to stdin.
-# We do this by copying ui.sh and swapping '< /dev/tty' -> '' and '> /dev/tty' -> '>&2'.
-sed -e 's|< /dev/tty||g' -e 's|> /dev/tty|>\&2|g' lib/ui.sh > /tmp/ui_notty.sh
-bash -n /tmp/ui_notty.sh || { echo "ui_notty syntax broken"; exit 1; }
+# ui.sh now reads plain stdin, so piping input to it just works -- no
+# rewriting needed (that indirection is what the stdin fix removed).
 
 lastline() { "$@" | tail -n1; }
 
 run_snippet() { # input, code -> prints result on fd1
   local input="$1" code="$2"
-  printf '%s' "$input" | bash -c ". /tmp/ui_notty.sh; $code" 2>/dev/null
+  printf '%s' "$input" | bash -c ". lib/ui.sh; $code" 2>/dev/null
 }
 
 echo "== prompt =="

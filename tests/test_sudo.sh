@@ -41,23 +41,29 @@ else
   fail_ "no message for the passwordless case"
 fi
 
-# The explanation has to come before `sudo -v`, or the user hits the prompt
-# with no idea what to type — the exact complaint that prompted this fix.
-hint_line="$(printf '%s' "$block" | grep -n 'never set a password' | cut -d: -f1 | head -n1)"
-sudov_line="$(printf '%s' "$block" | grep -n 'sudo -v' | cut -d: -f1 | head -n1)"
+# The explanation has to come before the password prompt, or the user hits
+# it with no idea what to type — the exact complaint that prompted this fix.
+hint_line="$(printf '%s' "$block" | grep -n "don't know a password" | cut -d: -f1 | head -n1)"
+sudov_line="$(printf '%s' "$block" | grep -n 'sudo -p' | cut -d: -f1 | head -n1)"
 if [ -n "$hint_line" ] && [ -n "$sudov_line" ] && [ "$hint_line" -lt "$sudov_line" ]; then
-  ok_ "'never set a password' guidance appears BEFORE the sudo -v prompt"
+  ok_ "no-password guidance appears BEFORE the password prompt"
 else
-  fail_ "guidance missing or appears after the prompt (hint=$hint_line sudov=$sudov_line)"
+  fail_ "guidance missing or appears after the prompt (hint=$hint_line prompt=$sudov_line)"
 fi
 
-for phrase in "passwordless" "ubuntu@"; do
-  if printf '%s' "$block" | grep -q "$phrase"; then
-    ok_ "mentions '$phrase'"
-  else
-    fail_ "does not mention '$phrase'"
-  fi
-done
+# Must name the escape hatch: log in as ubuntu, which needs no password.
+if printf '%s' "$block" | grep -q 'ssh ubuntu@'; then
+  ok_ "offers the 'log in as ubuntu' escape hatch"
+else
+  fail_ "does not tell the user to log in as ubuntu"
+fi
+
+# Must not block forever when there is no terminal to prompt on.
+if printf '%s' "$block" | grep -q 'HAVE_TTY'; then
+  ok_ "guards the no-terminal case instead of hanging"
+else
+  fail_ "no HAVE_TTY guard around the password prompt"
+fi
 
 echo
 echo "== root check should steer away from 'sudo ./setup.sh' =="

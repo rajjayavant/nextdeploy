@@ -9,6 +9,22 @@
 
 set -uo pipefail
 
+# ── Reclaim the terminal ───────────────────────────────────────────────────
+# When this script is run as `bash <(curl ...)` or `curl ... | bash`, stdin
+# is the script text, not the keyboard. That breaks two things at once:
+# `read` gets script bytes instead of typed input, and `sudo` finds no
+# terminal to ask for a password on.
+#
+# Reattaching stdin to the controlling terminal once, here, fixes both --
+# and lets every `read` below just use stdin normally.
+if [ ! -t 0 ] && [ -r /dev/tty ]; then
+  exec < /dev/tty
+fi
+
+# True only if we genuinely have a terminal to talk to. When we don't
+# (cron, CI, a pipe with no tty) we must not block on a prompt.
+if [ -t 0 ]; then HAVE_TTY=1; else HAVE_TTY=0; fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NEXTDEPLOY_VERSION="0.1.0"
 NEXTDEPLOY_RAW_BASE="${NEXTDEPLOY_RAW_BASE:-https://raw.githubusercontent.com/rajjayavant/nextdeploy/main}"
@@ -20,12 +36,22 @@ _load_lib() {
     # shellcheck source=/dev/null
     . "$SCRIPT_DIR/lib/$name"
   else
+    # No local lib/ — we were piped in from curl, so fetch it. Say so out
+    # loud: if someone edited lib/ locally and ran the script through
+    # process substitution, SCRIPT_DIR is /dev/fd and their edits are
+    # silently ignored in favour of whatever is on the remote branch.
+    echo "· Fetching lib/$name from $NEXTDEPLOY_RAW_BASE" >&2
     local tmp; tmp="$(mktemp)"
     if curl -fsSL "$NEXTDEPLOY_RAW_BASE/lib/$name" -o "$tmp" 2>/dev/null; then
       # shellcheck source=/dev/null
       . "$tmp"; rm -f "$tmp"
     else
-      echo "Could not load lib/$name (tried $SCRIPT_DIR/lib and $NEXTDEPLOY_RAW_BASE)." >&2
+      rm -f "$tmp"
+      echo "Could not load lib/$name." >&2
+      echo "  Looked in: $SCRIPT_DIR/lib/$name" >&2
+      echo "  And at:    $NEXTDEPLOY_RAW_BASE/lib/$name" >&2
+      echo "" >&2
+      echo "If you cloned the repo, run ./setup.sh from inside it." >&2
       exit 1
     fi
   fi
@@ -142,28 +168,43 @@ If you aren't logged in as 'ubuntu', log in as that user first:
     ok "sudo access confirmed (no password needed)"
   else
     blank
-    warn "Your user needs a password for sudo."
-    hint "If you're on a default EC2 Ubuntu image logged in as 'ubuntu',
-you normally would NOT see this — that account has passwordless
-sudo and no password set.
+    warn "sudo wants a password for '$USER'."
+    hint "On a stock EC2 Ubuntu image, logged in as 'ubuntu', you would
+normally NOT see this — that account sudoes without a password.
 
 Seeing it usually means one of:
 
-  • You're logged in as a different user you created yourself.
-    Use the password you set for that user.
+  • You're logged in as a user you created yourself. Use that
+    user's password.
 
-  • You're on a non-AWS or customised image where the cloud-init
-    NOPASSWD rule isn't present.
+  • You're on a customised or non-AWS image without the
+    cloud-init NOPASSWD rule.
 
-If you never set a password and don't know one, press Ctrl-C and
-log back in as the 'ubuntu' user instead:
+If you don't know a password, press Ctrl-C and log back in as
+'ubuntu', which doesn't need one:
 
-    ssh ubuntu@$(detect_public_ip 2>/dev/null || echo YOUR_SERVER_IP)
+    ssh ubuntu@YOUR_SERVER_IP
 
-If you know your password, enter it at the prompt below."
+Otherwise type your password at the prompt below. Nothing is
+echoed as you type — no dots, no stars. That's normal; just
+type it and press Enter."
     blank
 
-    if ! sudo -v; then
+    if [ "$HAVE_TTY" -eq 0 ]; then
+      err "No terminal available to ask for a password."
+      hint "This script is running without a terminal attached, so sudo
+has no way to prompt you.
+
+If you ran it through a pipe, use process substitution instead
+so the terminal stays connected:
+
+    bash <(curl -fsSL $NEXTDEPLOY_RAW_BASE/setup.sh)"
+      return 1
+    fi
+
+    # -v refreshes the credential; the custom prompt makes it obvious
+    # which program is asking and for whose password.
+    if ! sudo -p "[sudo] password for %u (typing is hidden): " -v; then
       blank
       err "Could not get sudo access."
       hint "Nothing has been changed on this server.

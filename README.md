@@ -8,6 +8,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/rajjayavant/nextdeploy/main/
 
 This is the **first** command you run on a brand-new server. It assumes nothing is installed.
 
+> Use `bash <(curl ...)` as written — **not** `curl ... | bash`. The pipe form hands the script's own text to `read` as if you had typed it, so prompts answer themselves and `sudo` has no terminal to ask for a password on.
+
 ---
 
 ## What it does

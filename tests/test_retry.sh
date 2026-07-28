@@ -3,10 +3,8 @@
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-# ui.sh reads from /dev/tty so it works under `curl | bash`. For testing we
-# rewrite those redirections so we can drive it with piped input.
-sed -e 's|< /dev/tty||g' -e 's|> /dev/tty|>\&2|g' lib/ui.sh > /tmp/ui_notty_retry.sh
-. /tmp/ui_notty_retry.sh
+# ui.sh reads plain stdin, so we can drive it with piped input directly.
+. lib/ui.sh
 
 PASS=0; FAIL=0
 check() { if [ "$2" = "$3" ]; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); echo "  FAIL $1: got '$3' want '$2'"; fi; }
