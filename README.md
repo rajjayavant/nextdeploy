@@ -1,87 +1,63 @@
-# nextdeploy
+<p align="center">
+  <img src="assets/demo.svg" alt="nextdeploy running on a fresh Ubuntu EC2 instance" width="760">
+</p>
 
-Take a fresh Ubuntu EC2 instance to a live Next.js app on HTTPS — with one command.
+<h1 align="center">nextdeploy</h1>
+
+<p align="center">
+  Take a fresh Ubuntu EC2 instance to a live Next.js app on HTTPS — with one command.
+</p>
+
+---
+
+## Quick start
+
+SSH into your server as `ubuntu` and run:
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/rajjayavant/nextdeploy/main/setup.sh)
 ```
 
-This is the **first** command you run on a brand-new server. It assumes nothing is installed.
+Answer the questions as they come. That's the whole thing.
 
-> Use `bash <(curl ...)` as written — **not** `curl ... | bash`. The pipe form hands the script's own text to `read` as if you had typed it, so prompts answer themselves and `sudo` has no terminal to ask for a password on.
-
----
+> Use `bash <(curl ...)` as written — **not** `curl ... | bash`. The pipe form feeds the script's own text to the prompts, so they answer themselves.
 
 ## What it does
 
-The script walks you through twelve steps, asking questions as it goes:
+| Step | |
+|---|---|
+| 1 | Checks the machine — Ubuntu, sudo, disk, RAM. Adds swap on small instances. |
+| 2 | `apt update` and base tools |
+| 3 | Node.js 20 LTS |
+| 4 | Asks which package manager you use |
+| 5 | Asks for your repo, detects whether it's public or private |
+| 6 | Private repos: generates an SSH key and shows you where to paste it |
+| 7 | Clones, and works out which package manager the project *actually* needs |
+| 8 | Asks for your `.env` (before the build — Next.js needs it then) |
+| 9 | Installs dependencies and builds |
+| 10 | Starts the app with PM2, enables start-on-reboot |
+| 11 | Nginx reverse proxy on port 80 |
+| 12 | Shows the DNS records to add, waits for them, then gets an HTTPS certificate |
 
-| # | Step | What happens |
-|---|------|--------------|
-| 0 | Pre-flight | Checks Ubuntu, sudo, disk, RAM. Offers a swap file on small instances. |
-| 1 | System update | `apt update`, installs `curl`, `git`, `ufw`, `dnsutils`. |
-| 2 | Node.js | Installs Node 20 LTS from NodeSource (Ubuntu's own package is too old). |
-| 3 | Package manager | You choose **npm**, **yarn**, **pnpm**, or **bun** — a hint only; step 6 checks what the repo actually uses. |
-| 4 | Repository | You paste a repo URL. It detects whether the repo is public or private. |
-| 5 | Deploy key | *Private repos only* — generates an SSH key, shows you exactly where to paste it, then verifies access. |
-| 6 | Clone | Clones the repo, confirms it's a Next.js project, and reads `packageManager` and the lockfile to work out which package manager it really needs. |
-| 7 | Environment | You paste your `.env` contents. Happens **before** the build, because Next.js bakes `NEXT_PUBLIC_*` vars in at build time. |
-| 8 | Install & build | Installs dependencies and runs the production build. |
-| 9 | PM2 | Starts the app, waits until it really responds, enables start-on-reboot. |
-| 10 | Nginx | Reverse-proxies port 80 to your app. |
-| 11 | HTTPS | Shows the exact DNS records to add, waits until they resolve to this server, then gets a Let's Encrypt certificate via Certbot. |
+Afterwards, `~/redeploy.sh` ships updates: pull → install → build → restart.
 
-At the end you get a `~/redeploy.sh` for shipping updates:
+## Before you start
 
-```bash
-./redeploy.sh    # pull → install → build → restart
-```
-
-## Requirements
-
-- A fresh **Ubuntu** EC2 instance (20.04 / 22.04 / 24.04)
-- SSH access as a **non-root** sudo user (on stock Ubuntu AMIs that's `ubuntu`)
-- A Next.js app in a Git repository
-- Optionally, a domain name if you want HTTPS
-
-### Do I need a sudo password?
-
-**No.** Run the script as `ubuntu` (or whichever normal user you SSH in as) — *not* with `sudo`:
-
-```bash
-./setup.sh          # ✓
-sudo ./setup.sh     # ✗ — the script refuses this
-```
-
-The script calls `sudo` itself for the handful of steps that need root. On a stock EC2 Ubuntu image the `ubuntu` user has **passwordless sudo** and no password set at all, so you'll never be asked for one.
-
-If you *are* prompted for a password, you're most likely logged in as a user you created yourself rather than `ubuntu`. Log in as `ubuntu` instead:
-
-```bash
-ssh ubuntu@your-server-ip
-```
-
-If you deliberately created your own user and it isn't in the sudo group, add it from a root shell, then log out and back in:
-
-```bash
-usermod -aG sudo YOUR_USERNAME
-```
-
-### One thing the script can't do for you
-
-It runs *on* the server, so it cannot change your **EC2 security group** — that lives in AWS. Before running, allow inbound traffic:
+Open these ports on your instance's **security group** in the AWS console. The script runs *on* the server, so it can't do this for you:
 
 | Type | Port | Source |
-|------|------|--------|
+|---|---|---|
 | SSH | 22 | Your IP |
 | HTTP | 80 | `0.0.0.0/0` |
 | HTTPS | 443 | `0.0.0.0/0` |
 
-Port 80 must be open from anywhere or Let's Encrypt cannot verify your domain.
+Port 80 must be open from anywhere, or Let's Encrypt can't verify your domain.
 
-## Design principles
+You'll also want a Next.js app in a Git repo, and a domain if you want HTTPS.
 
-**Every step is retryable.** When something fails you get a menu — retry, drop to a shell and investigate, skip, or abort — not a stack trace and a half-configured server.
+## If a step fails
+
+You get a menu, not a stack trace:
 
 ```
 ✗ Step failed: Install and build
@@ -93,81 +69,92 @@ Port 80 must be open from anywhere or Let's Encrypt cannot verify your domain.
     4) Abort setup
 ```
 
-**Check before doing.** The script waits for the `apt` lock instead of failing on it, verifies DNS resolves to this server before calling Certbot, confirms the app answers on its port before setting up Nginx, and checks port 80 is externally reachable before requesting a certificate. Most failures are prevented rather than reported.
+Fix the problem, choose **Retry**, and it carries on. The script is safe to re-run from scratch too — it won't duplicate Nginx configs, stack PM2 processes, or re-clone over your app.
 
-**Errors explain themselves.** Every failure says what went wrong, why it usually happens, and the command to investigate:
+<details>
+<summary><b>Do I need a sudo password?</b></summary>
 
-```
-✗ DNS isn't ready yet.
-  ┌─
-  │ If you've only just added the records, this is normal — give it
-  │ 2–5 minutes and check again.
-  │
-  │ If it's been longer, check:
-  │   • The record type is A (not CNAME, not AAAA)
-  │   • The value is exactly 13.234.56.78
-  │   • Cloudflare proxying is OFF (grey cloud, not orange)
-  └─
+<br>
+
+No. Run it as `ubuntu` — *not* with `sudo`:
+
+```bash
+./setup.sh          # ✓
+sudo ./setup.sh     # ✗ — the script refuses this
 ```
 
-**Ambiguous inputs get examples.** Anywhere you could reasonably get it wrong, the format is shown first:
+It calls `sudo` itself where needed. On a stock EC2 Ubuntu image the `ubuntu` user sudoes without a password, so you'll never be asked.
 
+If you *are* asked, you're probably logged in as a user you created rather than `ubuntu`. Log in as `ubuntu` instead. If you meant to use your own user and it isn't in the sudo group, run `usermod -aG sudo YOUR_USERNAME` from a root shell, then log out and back in.
+
+</details>
+
+<details>
+<summary><b>Troubleshooting</b></summary>
+
+<br>
+
+```bash
+pm2 logs myapp                  # app logs — start here
+pm2 status                      # is it running?
+sudo nginx -t                   # is the Nginx config valid?
+sudo systemctl status nginx     # is Nginx running?
+sudo certbot certificates       # certificate status and expiry
+curl -I http://127.0.0.1:3000   # does the app answer locally?
 ```
-  ┌─
-  │ Enter just the domain, nothing else.
-  │
-  │     ✓  wikipedia.org
-  │     ✓  app.mycompany.io
-  │
-  │     ✗  https://wikipedia.org      ← no protocol
-  │     ✗  wikipedia.org/wiki/Home    ← no path
-  │     ✗  wikipedia.org:3000         ← no port
-  └─
-```
 
-**Safe to re-run.** Re-running detects what's already done: it won't duplicate Nginx configs, stack PM2 processes, or re-clone over your app. Run it again any time to add a domain or set up HTTPS you skipped.
+**Works on `http://<ip>` but not your domain** — DNS hasn't propagated. Give it a few minutes.
 
-## Notes on a few decisions
+**Works via `curl` on the server but not in your browser** — the EC2 security group is blocking the port.
 
-- **Node 20 from NodeSource**, because `apt install nodejs` on Ubuntu 22.04 gives you Node 12, which no current Next.js supports.
-- **A swap file on instances under 2GB.** `next build` is memory-hungry and gets OOM-killed on a `t2.micro` with striking reliability. The script offers 2GB of swap and explains why.
-- **A PM2 ecosystem file** rather than `pm2 start "npm start"` — the latter makes PM2 look for a *file* named `npm start`, and an env var set before `pm2` reaches the CLI, not your app.
-- **The ecosystem file is `.cjs`, never `.js`.** PM2 config is CommonJS, but a `package.json` with `"type": "module"` — common in modern Next.js apps — makes Node parse every `.js` file as an ES module, so `module.exports` throws. The `.cjs` extension is CommonJS whatever `"type"` says. The config is also loaded with `node` before PM2 sees it, because PM2's own error for a bad config is just `malformated`.
-- **`.env` before build, not after.** Getting this backwards means `NEXT_PUBLIC_*` variables silently end up `undefined` in the browser bundle.
-- **The package-manager question is a hint, not a commitment.** You're asked before the repo exists on disk, so you'd be guessing. After cloning, the script reads `packageManager` and the lockfile — which actually know the answer — and offers to switch if they disagree. Where the project pins a version, Corepack is used to match it exactly.
-- **A malformed `packageManager` is called out, not worked around silently.** A value like `"yarn@pnpm@10.13.1"` names two managers at once; Corepack refuses to run and yarn stops with a version-mismatch error. The script explains the problem, reads the intended manager from the field, and tells you to fix it upstream.
-- **The app runs as your user, not root.** Root-owned app files and a root PM2 daemon cause permission problems later and widen the blast radius of any app vulnerability.
+**Certbot fails with a timeout** — port 80 isn't reachable from outside. Same cause.
 
-## Project layout
+**Build gets killed partway through** — out of memory. Re-run and accept the swap file offer.
+
+</details>
+
+<details>
+<summary><b>Why it does a few things the way it does</b></summary>
+
+<br>
+
+**Node 20 from NodeSource.** `apt install nodejs` on Ubuntu 22.04 gives you Node 12, which no current Next.js supports.
+
+**Swap on instances under 2GB.** `next build` is memory-hungry and gets OOM-killed on a `t2.micro` with dispiriting reliability.
+
+**`.env` before the build.** Next.js inlines `NEXT_PUBLIC_*` variables at build time. Writing the file afterwards leaves them `undefined` in the browser bundle.
+
+**The package-manager question is a hint, not a commitment.** You're asked before the repo is on disk, so you'd be guessing. After cloning, the script reads `packageManager` and the lockfile and offers to switch if they disagree. npm, yarn, pnpm, and bun all work.
+
+**The PM2 config is `.cjs`, never `.js`.** PM2 config is CommonJS, but a `package.json` with `"type": "module"` makes Node parse `.js` as an ES module, so `module.exports` throws. It's also loaded with `node` before PM2 sees it, because PM2's error for a bad config is just `malformated`.
+
+**A PM2 ecosystem file** rather than `pm2 start "npm start"` — the latter makes PM2 look for a *file* by that name, and doesn't pass `PORT` to your app.
+
+**The app runs as your user, not root.** Root-owned files and a root PM2 daemon cause permission problems later and widen the blast radius of any app vulnerability.
+
+</details>
+
+<details>
+<summary><b>Project layout and tests</b></summary>
+
+<br>
 
 ```
 setup.sh          the installer
 lib/ui.sh         prompts, colours, the retry engine
 lib/validate.sh   input validation and pre-flight checks
+tests/            run with: bash tests/run_all.sh
 ```
 
-`setup.sh` fetches `lib/` automatically when piped from `curl`, so the one-liner works without cloning.
+`setup.sh` fetches `lib/` automatically when piped from curl, so the one-liner works without cloning.
 
-## Troubleshooting
+The tests cover what can be checked off-server: URL, domain, port and email validation; the retry engine; the prompt helpers; package-manager detection; and the generated Nginx, PM2, and redeploy configs. They don't cover apt, NodeSource, Certbot, or live DNS — those need a real Ubuntu host.
 
-```bash
-pm2 logs myapp              # app logs — start here
-pm2 status                  # is it running?
-sudo nginx -t               # is the Nginx config valid?
-sudo systemctl status nginx # is Nginx running?
-sudo certbot certificates   # certificate status and expiry
-curl -I http://127.0.0.1:3000   # does the app answer locally?
-```
-
-If the site works on `http://<ip>` but not on your domain, DNS hasn't propagated. If it works locally via `curl` but not from your browser, it's the EC2 security group.
+</details>
 
 ## Status
 
-v0.1.0 — **not yet tested end-to-end on a real EC2 instance.**
-
-The logic that can be tested off-server has been: URL/domain/port/email validation, the retry engine's four paths, the prompt helpers, and the generated Nginx, PM2, and redeploy configs (see `tests/`). But the full run — apt, NodeSource, Certbot, a live DNS check — has not been exercised against a real Ubuntu box yet.
-
-Treat the first run as a shakedown, and please open an issue if a step misbehaves.
+v0.1.0 — working, and deployed successfully end-to-end on Ubuntu 24.04. Still young, so expect rough edges on setups unlike that one. Issues and PRs welcome.
 
 ## License
 

@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 552" width="760" height="552" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13">
+  <defs>
+    <clipPath id="screen"><rect x="0" y="40" width="760" height="512"/></clipPath>
+  </defs>
+
+  <!-- window -->
+  <rect width="760" height="552" rx="10" fill="#12151c"/>
+  <rect width="760" height="40" rx="10" fill="#1c2029"/>
+  <rect y="30" width="760" height="10" fill="#1c2029"/>
+  <line x1="0" y1="40" x2="760" y2="40" stroke="#000" stroke-opacity=".35"/>
+
+  <!-- traffic lights -->
+  <circle cx="22" cy="20" r="6" fill="#ff5f57"/>
+  <circle cx="42" cy="20" r="6" fill="#febc2e"/>
+  <circle cx="62" cy="20" r="6" fill="#28c840"/>
+  <text x="380" y="25" fill="#8b93a7" font-size="12" text-anchor="middle">ubuntu@ec2 — nextdeploy</text>
+
+  <g clip-path="url(#screen)">
+  <text fill="#c9d1d9" xml:space="preserve">
+
+    <tspan x="20" y="70"><tspan fill="#56d364">$</tspan> <tspan fill="#c9d1d9">bash &lt;(curl -fsSL https://raw.githubusercontent.com/…/setup.sh)</tspan></tspan>
+
+    <tspan x="20" y="98" fill="#58a6ff" font-weight="bold">  nextdeploy</tspan><tspan fill="#6e7681"> v0.1.0</tspan>
+    <tspan x="20" y="116" fill="#6e7681">  Fresh Ubuntu box → live Next.js app over HTTPS.</tspan>
+
+    <tspan x="20" y="146" fill="#58a6ff" font-weight="bold">[1/12] Checking this machine</tspan>
+    <tspan x="20" y="164"><tspan fill="#3fb950">✓</tspan> Ubuntu 24.04</tspan>
+    <tspan x="20" y="182"><tspan fill="#3fb950">✓</tspan> sudo access confirmed (no password needed)</tspan>
+    <tspan x="20" y="200"><tspan fill="#3fb950">✓</tspan> Public IP: <tspan font-weight="bold">13.234.56.78</tspan></tspan>
+
+    <tspan x="20" y="230" fill="#58a6ff" font-weight="bold">[3/12] Installing Node.js</tspan>
+    <tspan x="20" y="248"><tspan fill="#3fb950">✓</tspan> Node.js v20.19.0 installed</tspan>
+
+    <tspan x="20" y="278" fill="#58a6ff" font-weight="bold">[6/12] Cloning your repository</tspan>
+    <tspan x="20" y="296"><tspan fill="#3fb950">✓</tspan> Cloned into /home/ubuntu/my-app</tspan>
+    <tspan x="20" y="314"><tspan fill="#3fb950">✓</tspan> Next.js project detected</tspan>
+    <tspan x="20" y="332"><tspan fill="#3fb950">✓</tspan> Confirmed pnpm — found pnpm-lock.yaml</tspan>
+
+    <tspan x="20" y="362" fill="#58a6ff" font-weight="bold">[9/12] Installing dependencies and building</tspan>
+    <tspan x="20" y="380"><tspan fill="#f85149">✗</tspan> Step failed<tspan fill="#6e7681"> — every step offers a way out:</tspan></tspan>
+    <tspan x="20" y="398" fill="#8b949e">    1) Retry   2) Open a shell   3) Skip   4) Abort</tspan>
+    <tspan x="20" y="416"><tspan fill="#3fb950">✓</tspan> Build succeeded<tspan fill="#6e7681"> (retried)</tspan></tspan>
+
+    <tspan x="20" y="446" fill="#58a6ff" font-weight="bold">[12/12] HTTPS with a free Let's Encrypt certificate</tspan>
+    <tspan x="20" y="464"><tspan fill="#3fb950">✓</tspan> DNS is pointing at this server</tspan>
+    <tspan x="20" y="482"><tspan fill="#3fb950">✓</tspan> Certificate issued and Nginx updated</tspan>
+
+    <tspan x="20" y="512" fill="#3fb950" font-weight="bold">✓ Setup complete</tspan><tspan fill="#6e7681">  →  </tspan><tspan fill="#58a6ff" font-weight="bold">https://myapp.com</tspan>
+  </text>
+  </g>
+</svg>
