@@ -19,7 +19,7 @@ done
 [ "$SYNTAX_FAIL" -eq 0 ] || { echo; echo "SYNTAX ERRORS — stopping."; exit 1; }
 
 FAILED=()
-for t in test_validate.sh test_ui.sh test_stdin.sh test_retry.sh test_sudo.sh test_eco.sh test_redeploy.sh; do
+for t in test_validate.sh test_ui.sh test_stdin.sh test_retry.sh test_pkgmanager.sh test_sudo.sh test_eco.sh test_redeploy.sh; do
   echo
   echo "── $t ──────────────────────────────────────────"
   bash "$t" || FAILED+=("$t")

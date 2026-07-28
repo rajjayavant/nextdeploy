@@ -21,10 +21,10 @@ The script walks you through twelve steps, asking questions as it goes:
 | 0 | Pre-flight | Checks Ubuntu, sudo, disk, RAM. Offers a swap file on small instances. |
 | 1 | System update | `apt update`, installs `curl`, `git`, `ufw`, `dnsutils`. |
 | 2 | Node.js | Installs Node 20 LTS from NodeSource (Ubuntu's own package is too old). |
-| 3 | Package manager | You choose **npm** or **yarn**. |
+| 3 | Package manager | You choose **npm**, **yarn**, **pnpm**, or **bun** — a hint only; step 6 checks what the repo actually uses. |
 | 4 | Repository | You paste a repo URL. It detects whether the repo is public or private. |
 | 5 | Deploy key | *Private repos only* — generates an SSH key, shows you exactly where to paste it, then verifies access. |
-| 6 | Clone | Clones the repo and confirms it's actually a Next.js project. |
+| 6 | Clone | Clones the repo, confirms it's a Next.js project, and reads `packageManager` and the lockfile to work out which package manager it really needs. |
 | 7 | Environment | You paste your `.env` contents. Happens **before** the build, because Next.js bakes `NEXT_PUBLIC_*` vars in at build time. |
 | 8 | Install & build | Installs dependencies and runs the production build. |
 | 9 | PM2 | Starts the app, waits until it really responds, enables start-on-reboot. |
@@ -133,6 +133,8 @@ Port 80 must be open from anywhere or Let's Encrypt cannot verify your domain.
 - **A swap file on instances under 2GB.** `next build` is memory-hungry and gets OOM-killed on a `t2.micro` with striking reliability. The script offers 2GB of swap and explains why.
 - **A PM2 ecosystem file** rather than `pm2 start "npm start"` — the latter makes PM2 look for a *file* named `npm start`, and an env var set before `pm2` reaches the CLI, not your app.
 - **`.env` before build, not after.** Getting this backwards means `NEXT_PUBLIC_*` variables silently end up `undefined` in the browser bundle.
+- **The package-manager question is a hint, not a commitment.** You're asked before the repo exists on disk, so you'd be guessing. After cloning, the script reads `packageManager` and the lockfile — which actually know the answer — and offers to switch if they disagree. Where the project pins a version, Corepack is used to match it exactly.
+- **A malformed `packageManager` is called out, not worked around silently.** A value like `"yarn@pnpm@10.13.1"` names two managers at once; Corepack refuses to run and yarn stops with a version-mismatch error. The script explains the problem, reads the intended manager from the field, and tells you to fix it upstream.
 - **The app runs as your user, not root.** Root-owned app files and a root PM2 daemon cause permission problems later and widen the blast radius of any app vulnerability.
 
 ## Project layout

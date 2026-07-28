@@ -380,35 +380,33 @@ one and retry:
 choose_package_manager() {
   step "Choosing a package manager"
 
-  dim "This is what will install your app's dependencies."
-  dim "If your repo has a yarn.lock file, pick Yarn. If it has a"
-  dim "package-lock.json, pick npm. If you're not sure, pick npm."
+  dim "This installs your app's dependencies."
+  blank
+  dim "If you're not sure, just pick npm. After we clone your repo we"
+  dim "read its lockfile and package.json, and if the project actually"
+  dim "expects something else we'll say so and offer to switch."
+  blank
 
   local pick
   choose pick "Which package manager does your project use?" \
-    "npm  (comes with Node — the safe default)" \
-    "yarn (only if your repo has a yarn.lock)"
+    "npm  (comes with Node — safe default)" \
+    "yarn" \
+    "pnpm" \
+    "bun"
 
   case "$pick" in
-    npm*)  PKG_MANAGER="npm" ;;
+    npm*)  PKG_MANAGER="npm"  ;;
     yarn*) PKG_MANAGER="yarn" ;;
+    pnpm*) PKG_MANAGER="pnpm" ;;
+    bun*)  PKG_MANAGER="bun"  ;;
   esac
 
-  if [ "$PKG_MANAGER" = "yarn" ]; then
-    if has_cmd yarn; then
-      ok "Yarn v$(yarn --version 2>/dev/null) already installed"
-    else
-      info "Installing Yarn…"
-      run_quiet sudo npm install -g yarn || {
-        hint "Installing Yarn globally failed. You can fall back to npm —
-it works for almost every project, including ones with a
-yarn.lock file. Re-run this step and choose npm."
-        return 1
-      }
-      ok "Yarn v$(yarn --version 2>/dev/null) installed"
-    fi
-  else
+  # Only npm is guaranteed present right now; the rest are installed after
+  # the clone, where package.json can tell us which version to pin.
+  if [ "$PKG_MANAGER" = "npm" ]; then
     ok "Using npm v$(npm --version 2>/dev/null)"
+  else
+    ok "Will use $PKG_MANAGER (installed after we've seen your repo)"
   fi
 
   save_state
@@ -674,17 +672,174 @@ right repository — and that your app isn't in a subdirectory."
     confirm "Continue anyway?" "n" || return 1
   fi
 
-  # Nudge toward the matching package manager if the lockfile disagrees.
-  if [ "$PKG_MANAGER" = "npm" ] && [ -f "$APP_DIR/yarn.lock" ] && [ ! -f "$APP_DIR/package-lock.json" ]; then
-    warn "This repo has a yarn.lock but you chose npm."
-    dim "  npm will still work, but it will ignore the locked versions."
-    if has_cmd yarn && confirm "Switch to Yarn?" "y"; then PKG_MANAGER="yarn"; fi
-  elif [ "$PKG_MANAGER" = "yarn" ] && [ -f "$APP_DIR/package-lock.json" ] && [ ! -f "$APP_DIR/yarn.lock" ]; then
-    warn "This repo has a package-lock.json but you chose Yarn."
-    if confirm "Switch to npm?" "y"; then PKG_MANAGER="npm"; fi
-  fi
+  reconcile_package_manager
 
   save_state
+  return 0
+}
+
+# Now that the repo is on disk it can tell us what it actually wants, which
+# beats the guess made before cloning. Lockfiles and `packageManager` are
+# authoritative; the earlier prompt was only ever a hint.
+reconcile_package_manager() {
+  local detected="" reason="" pm_field=""
+
+  # `packageManager` is the strongest signal — it's what Corepack enforces.
+  pm_field="$(grep -o '"packageManager"[[:space:]]*:[[:space:]]*"[^"]*"' "$APP_DIR/package.json" 2>/dev/null \
+    | sed 's/.*:[[:space:]]*"//; s/"$//' || true)"
+
+  if [ -n "$pm_field" ]; then
+    # The valid form is exactly one name, one @, then a version. Decide
+    # validity before matching a prefix: "yarn@pnpm@10.13.1" starts with
+    # "yarn@" and would otherwise be read as a legitimate yarn pin, which
+    # is precisely how a typo becomes a baffling mid-install failure.
+    local pm_name="${pm_field%%@*}"
+    local ats="${pm_field//[^@]/}"
+    local valid=0
+    if [ "${#ats}" -eq 1 ]; then
+      case "$pm_name" in
+        pnpm|yarn|npm|bun) valid=1 ;;
+      esac
+    fi
+
+    if [ "$valid" -eq 1 ]; then
+      detected="$pm_name"
+      reason="package.json declares \"packageManager\": \"$pm_field\""
+    else
+      blank
+      warn "package.json has a malformed \"packageManager\" field:"
+      blank
+      printf '%s\n' "      ${C_RED}\"packageManager\": \"$pm_field\"${C_RESET}"
+      blank
+      hint "That value isn't valid. The format is one name, one @, and a
+version:
+
+    \"packageManager\": \"pnpm@10.13.1\"
+    \"packageManager\": \"yarn@4.1.0\"
+
+A value like \"yarn@pnpm@10.13.1\" names two package managers at
+once. Corepack refuses to run when it sees that, and yarn stops
+with a message about a version mismatch.
+
+Worth fixing in your repository — it breaks any deploy that uses
+Corepack, not just this script. For now we'll work out the right
+manager from the rest of the project."
+      blank
+
+      # Salvage the name nearest the version — in "yarn@pnpm@10.13.1"
+      # that's pnpm, since the trailing 10.13.1 is the version it pins.
+      local last_name="${pm_field%@*}"   # drop the version
+      last_name="${last_name##*@}"       # keep the final name
+      case "$last_name" in
+        pnpm|yarn|npm|bun)
+          detected="$last_name"
+          reason="read '$last_name' out of the malformed field"
+          ;;
+      esac
+    fi
+  fi
+
+  # Lockfiles are the next-best evidence.
+  if [ -z "$detected" ]; then
+    if   [ -f "$APP_DIR/pnpm-lock.yaml" ];    then detected="pnpm"; reason="found pnpm-lock.yaml"
+    elif [ -f "$APP_DIR/yarn.lock" ];         then detected="yarn"; reason="found yarn.lock"
+    elif [ -f "$APP_DIR/package-lock.json" ]; then detected="npm";  reason="found package-lock.json"
+    elif [ -f "$APP_DIR/bun.lockb" ];         then detected="bun";  reason="found bun.lockb"
+    fi
+  fi
+
+  [ -z "$detected" ] && { dim "  (no lockfile — sticking with $PKG_MANAGER)"; return 0; }
+
+  if [ "$detected" = "$PKG_MANAGER" ]; then
+    ok "Confirmed $PKG_MANAGER — $reason"
+    return 0
+  fi
+
+  blank
+  warn "This project uses ${C_BOLD}$detected${C_RESET}, but you chose ${C_BOLD}$PKG_MANAGER${C_RESET}."
+  dim "  ($reason)"
+  blank
+  dim "Using the package manager the project expects installs exactly the"
+  dim "versions it was tested with. A different one ignores the lockfile"
+  dim "and resolves fresh, which occasionally pulls in a breaking update."
+  blank
+
+  local pick
+  choose pick "Which should we use?" \
+    "$detected — what this project expects (recommended)" \
+    "$PKG_MANAGER — what you picked earlier"
+
+  case "$pick" in
+    "$detected"*) PKG_MANAGER="$detected" ;;
+    *)            ok "Staying with $PKG_MANAGER"; return 0 ;;
+  esac
+
+  ensure_package_manager "$PKG_MANAGER" || return 1
+  return 0
+}
+
+# Make sure the chosen package manager is actually runnable, installing or
+# enabling it as needed. Returns non-zero only if it can't be provided.
+ensure_package_manager() {
+  local pm="$1"
+
+  case "$pm" in
+    npm)
+      has_cmd npm || { err "npm is missing — the Node.js step should have provided it."; return 1; }
+      ok "Using npm v$(npm --version 2>/dev/null)"
+      ;;
+
+    yarn|pnpm)
+      # Corepack ships with Node 16.9+ and is the supported way to get the
+      # exact version a project pins. Prefer it over a global install.
+      if [ -n "$(grep -o '"packageManager"[[:space:]]*:[[:space:]]*"[^"]*"' "$APP_DIR/package.json" 2>/dev/null)" ] \
+         && has_cmd corepack; then
+        info "Enabling Corepack to match the version your project pins…"
+        if run_quiet sudo corepack enable; then
+          ok "Corepack enabled"
+          # `corepack prepare` reads the pinned version from package.json.
+          ( cd "$APP_DIR" && run_quiet corepack prepare --activate ) \
+            && ok "Activated the version pinned in package.json" \
+            || dim "  (couldn't pre-activate; $pm will fetch it on first use)"
+          return 0
+        fi
+        dim "  (Corepack wouldn't enable — falling back to a global install)"
+      fi
+
+      if has_cmd "$pm"; then
+        ok "$pm v$("$pm" --version 2>/dev/null) already installed"
+        return 0
+      fi
+
+      info "Installing $pm…"
+      run_quiet sudo npm install -g "$pm" || {
+        hint "Installing $pm globally failed.
+
+npm can install almost any project, including one with a
+$pm lockfile — it just ignores the locked versions. Retry
+this step and choose npm if you'd rather move on."
+        return 1
+      }
+      ok "$pm v$("$pm" --version 2>/dev/null) installed"
+      ;;
+
+    bun)
+      if has_cmd bun; then
+        ok "bun v$(bun --version 2>/dev/null) already installed"
+        return 0
+      fi
+      info "Installing bun…"
+      if curl -fsSL https://bun.sh/install | bash > /dev/null 2>&1; then
+        export BUN_INSTALL="$HOME/.bun"
+        export PATH="$BUN_INSTALL/bin:$PATH"
+        has_cmd bun && ok "bun v$(bun --version 2>/dev/null) installed" || {
+          err "bun installed but isn't on PATH."; return 1; }
+      else
+        err "Couldn't install bun."
+        return 1
+      fi
+      ;;
+  esac
   return 0
 }
 
@@ -786,21 +941,43 @@ install_and_build() {
 
   cd "$APP_DIR" || { err "Couldn't enter $APP_DIR"; return 1; }
 
+  # The manager may have been switched after the clone revealed what the
+  # project actually uses, so make sure it's runnable before we lean on it.
+  ensure_package_manager "$PKG_MANAGER" || return 1
+
   info "Installing dependencies with $PKG_MANAGER — this can take a few minutes…"
+
+  # Prefer the strict, lockfile-respecting form, then fall back to a plain
+  # install. A lockfile that's out of sync with package.json fails the
+  # strict form, and that shouldn't be fatal on a first deploy.
   local install_ok=1
-  if [ "$PKG_MANAGER" = "yarn" ]; then
-    if [ -f yarn.lock ]; then yarn install --frozen-lockfile || yarn install || install_ok=0
-    else yarn install || install_ok=0; fi
-  else
-    if [ -f package-lock.json ]; then npm ci || npm install || install_ok=0
-    else npm install || install_ok=0; fi
-  fi
+  case "$PKG_MANAGER" in
+    yarn)
+      if [ -f yarn.lock ]; then yarn install --frozen-lockfile || yarn install || install_ok=0
+      else yarn install || install_ok=0; fi ;;
+    pnpm)
+      if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile || pnpm install || install_ok=0
+      else pnpm install || install_ok=0; fi ;;
+    bun)
+      bun install || install_ok=0 ;;
+    *)
+      if [ -f package-lock.json ]; then npm ci || npm install || install_ok=0
+      else npm install || install_ok=0; fi ;;
+  esac
 
   if [ "$install_ok" -eq 0 ]; then
     hint "Dependency installation failed. Common causes:
+
+  • A \"packageManager\" field that doesn't match the tool being
+    used. If the error above mentions Corepack, that's this —
+    the field in package.json is the authority, and it may be
+    wrong or malformed.
+
   • Out of memory — check with: free -h
+
   • A private npm package the server can't authenticate to
-  • A postinstall script that needs a tool we haven't installed
+
+  • A postinstall script needing a tool we haven't installed
 
 The full error is above."
     return 1
@@ -813,7 +990,12 @@ The full error is above."
     blank
     info "Building the app — this is the slowest part, often 1–3 minutes…"
     local build_ok=1
-    if [ "$PKG_MANAGER" = "yarn" ]; then yarn build || build_ok=0; else npm run build || build_ok=0; fi
+    case "$PKG_MANAGER" in
+      yarn) yarn build        || build_ok=0 ;;
+      pnpm) pnpm build        || build_ok=0 ;;
+      bun)  bun run build     || build_ok=0 ;;
+      *)    npm run build     || build_ok=0 ;;
+    esac
 
     if [ "$build_ok" -eq 0 ]; then
       blank
@@ -895,14 +1077,20 @@ npm's global directory has wrong permissions:
   # and a reboot intact.
   local script_bin script_args
   if grep -q '"start"' package.json 2>/dev/null; then
-    if [ "$PKG_MANAGER" = "yarn" ]; then
-      script_bin="yarn"; script_args="'start'"
-    else
-      script_bin="npm"; script_args="'run', 'start'"
-    fi
+    case "$PKG_MANAGER" in
+      yarn) script_bin="yarn"; script_args="'start'" ;;
+      pnpm) script_bin="pnpm"; script_args="'start'" ;;
+      bun)  script_bin="bun";  script_args="'run', 'start'" ;;
+      *)    script_bin="npm";  script_args="'run', 'start'" ;;
+    esac
   else
     script_bin="npx"; script_args="'next', 'start'"
   fi
+
+  # PM2 needs an absolute path: Corepack shims and a bun install under
+  # ~/.bun aren't on the PATH the PM2 daemon inherits at boot.
+  local resolved; resolved="$(command -v "$script_bin" 2>/dev/null || true)"
+  [ -n "$resolved" ] && script_bin="$resolved"
 
   local eco="$APP_DIR/ecosystem.config.js"
   info "Writing $eco …"
@@ -996,14 +1184,17 @@ ECOCONF
 # command differs between npm and yarn. Baking both into a script means the
 # user has one thing to remember and it's correct for their setup.
 write_redeploy_script() {
-  local build_cmd install_cmd git_env=""
-  if [ "$PKG_MANAGER" = "yarn" ]; then
-    install_cmd="yarn install --frozen-lockfile"
-    build_cmd="yarn build"
-  else
-    install_cmd="npm ci"
-    build_cmd="npm run build"
-  fi
+  local build_cmd install_cmd fallback_install git_env=""
+  case "$PKG_MANAGER" in
+    yarn) install_cmd="yarn install --frozen-lockfile"; fallback_install="yarn install"
+          build_cmd="yarn build" ;;
+    pnpm) install_cmd="pnpm install --frozen-lockfile"; fallback_install="pnpm install"
+          build_cmd="pnpm build" ;;
+    bun)  install_cmd="bun install";                    fallback_install="bun install"
+          build_cmd="bun run build" ;;
+    *)    install_cmd="npm ci";                         fallback_install="npm install"
+          build_cmd="npm run build" ;;
+  esac
   if [ "$REPO_IS_PRIVATE" = "yes" ]; then
     git_env="export GIT_SSH_COMMAND=\"ssh -i $DEPLOY_KEY -o IdentitiesOnly=yes\""
   fi
@@ -1020,7 +1211,9 @@ echo "→ Pulling latest code…"
 git pull --ff-only
 
 echo "→ Installing dependencies…"
-$install_cmd || ${install_cmd%% *} install
+# Fall back to a plain install when the lockfile is out of sync with
+# package.json — that shouldn't stop a deploy.
+$install_cmd || $fallback_install
 
 echo "→ Building…"
 $build_cmd
