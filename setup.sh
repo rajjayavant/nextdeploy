@@ -100,12 +100,17 @@ preflight() {
     hint "Running as root makes PM2 and your app files root-owned, which
 causes permission problems later and is a security risk.
 
-Log in as your normal user instead — on a stock Ubuntu EC2 image
-that's usually 'ubuntu':
+Run it WITHOUT sudo — as your normal user:
 
-    ssh ubuntu@your-server-ip
+    ./setup.sh
 
-Then run this script again."
+The script calls sudo itself for the few steps that need it. On a
+stock Ubuntu EC2 image the 'ubuntu' user can do that without ever
+being asked for a password, so there's nothing you need to set up.
+
+If you aren't logged in as 'ubuntu', log in as that user first:
+
+    ssh ubuntu@your-server-ip"
     return 1
   fi
 
@@ -128,22 +133,57 @@ Then run this script again."
     return 1
   fi
 
-  info "Checking sudo access (you may be prompted for your password)…"
-  if ! sudo -v; then
-    err "Could not get sudo access."
-    hint "Your user needs to be able to run sudo. On a default EC2 Ubuntu
-image the 'ubuntu' user already can. If you made a new user, add
-it to the sudo group from a root shell:
+  # Check for passwordless sudo FIRST. On a stock EC2 Ubuntu AMI the
+  # 'ubuntu' user has NOPASSWD sudo and has no password set at all, so
+  # prompting would be both unnecessary and unanswerable. `sudo -n` never
+  # prompts — it just fails if a password would be required.
+  info "Checking sudo access…"
+  if sudo -n true 2>/dev/null; then
+    ok "sudo access confirmed (no password needed)"
+  else
+    blank
+    warn "Your user needs a password for sudo."
+    hint "If you're on a default EC2 Ubuntu image logged in as 'ubuntu',
+you normally would NOT see this — that account has passwordless
+sudo and no password set.
+
+Seeing it usually means one of:
+
+  • You're logged in as a different user you created yourself.
+    Use the password you set for that user.
+
+  • You're on a non-AWS or customised image where the cloud-init
+    NOPASSWD rule isn't present.
+
+If you never set a password and don't know one, press Ctrl-C and
+log back in as the 'ubuntu' user instead:
+
+    ssh ubuntu@$(detect_public_ip 2>/dev/null || echo YOUR_SERVER_IP)
+
+If you know your password, enter it at the prompt below."
+    blank
+
+    if ! sudo -v; then
+      blank
+      err "Could not get sudo access."
+      hint "Nothing has been changed on this server.
+
+If you don't have a sudo password, log in as the 'ubuntu' user —
+on a stock EC2 Ubuntu image it can sudo without one.
+
+If you created this user yourself and it isn't in the sudo group,
+add it from a root shell:
 
     usermod -aG sudo YOUR_USERNAME
 
-then log out, log back in, and re-run."
-    return 1
+then log out, log back in, and re-run this script."
+      return 1
+    fi
+    ok "sudo access confirmed"
   fi
-  ok "sudo access confirmed"
 
-  # Keep sudo warm for the whole run so we don't stall on a re-prompt
-  # in the middle of a long apt or build.
+  # Keep sudo warm for the whole run so a long apt or build doesn't stall
+  # on a re-prompt halfway through. Harmless when sudo is passwordless.
   ( while true; do sudo -n true 2>/dev/null; sleep 50; done ) &
   SUDO_KEEPALIVE_PID=$!
   trap 'kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true' EXIT

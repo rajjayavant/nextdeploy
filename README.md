@@ -42,6 +42,29 @@ At the end you get a `~/redeploy.sh` for shipping updates:
 - A Next.js app in a Git repository
 - Optionally, a domain name if you want HTTPS
 
+### Do I need a sudo password?
+
+**No.** Run the script as `ubuntu` (or whichever normal user you SSH in as) — *not* with `sudo`:
+
+```bash
+./setup.sh          # ✓
+sudo ./setup.sh     # ✗ — the script refuses this
+```
+
+The script calls `sudo` itself for the handful of steps that need root. On a stock EC2 Ubuntu image the `ubuntu` user has **passwordless sudo** and no password set at all, so you'll never be asked for one.
+
+If you *are* prompted for a password, you're most likely logged in as a user you created yourself rather than `ubuntu`. Log in as `ubuntu` instead:
+
+```bash
+ssh ubuntu@your-server-ip
+```
+
+If you deliberately created your own user and it isn't in the sudo group, add it from a root shell, then log out and back in:
+
+```bash
+usermod -aG sudo YOUR_USERNAME
+```
+
 ### One thing the script can't do for you
 
 It runs *on* the server, so it cannot change your **EC2 security group** — that lives in AWS. Before running, allow inbound traffic:
